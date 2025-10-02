@@ -24,7 +24,15 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.ts\"",
     "build:btp": "mbt build",
-    "deploy:btp": "cf deploy .\\mta_archives\\btp-sap-odata-to-mcp-server_1.0.0.mtar"
+    "deploy:btp": "cf deploy .\\mta_archives\\btp-sap-odata-to-mcp-server_1.0.0.mtar",
+    "pm2:start": "npm run build && pm2 start ecosystem.config.cjs",
+    "pm2:stop": "pm2 stop btp-sap-odata-mcp",
+    "pm2:restart": "pm2 restart btp-sap-odata-mcp",
+    "pm2:logs": "pm2 logs btp-sap-odata-mcp",
+    "pm2:status": "pm2 status",
+    "pm2:monit": "pm2 monit",
+    "pm2:delete": "pm2 delete btp-sap-odata-mcp",
+    "pm2:save": "pm2 save"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.1",
@@ -57,6 +65,7 @@
     "eslint": "^9.34.0",
     "globals": "^16.3.0",
     "jiti": "^2.5.1",
+    "pm2": "^5.4.3",
     "prettier": "^3.6.2",
     "typescript": "^5.0.0",
     "typescript-eslint": "^8.41.0"

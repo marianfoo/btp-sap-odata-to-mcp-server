@@ -143,6 +143,75 @@ async function getOrCreateSession(sessionId?: string, userToken?: string): Promi
 }
 
 /**
+ * Simple bearer token authentication middleware
+ * Validates the Authorization header against ACCESS_TOKEN from env
+ * This runs BEFORE OAuth and provides a simple token-based auth option
+ */
+function bearerTokenAuthMiddleware(req: express.Request, res: express.Response, next: express.NextFunction): void {
+    const accessToken = process.env.ACCESS_TOKEN;
+    
+    // If no token is configured or it's empty, skip bearer auth check
+    if (!accessToken || accessToken.trim() === '') {
+        logger.debug('🔓 No ACCESS_TOKEN configured - skipping bearer auth check');
+        return next();
+    }
+
+    // Try multiple header sources (supports Microsoft Power Platform proxy and standard clients)
+    const authHeader = req.headers.authorization;
+    const bearerHeader = req.headers.bearer as string | undefined;  // Non-standard but used by some proxies
+    
+    let token: string | undefined;
+    
+    // Option 1: Check custom 'bearer' header (Microsoft Power Platform style)
+    if (bearerHeader) {
+        token = bearerHeader;
+        logger.debug(`🔑 Token found in 'bearer' header (Power Platform style)`);
+    }
+    // Option 2: Standard 'Authorization: Bearer <token>' header
+    else if (authHeader) {
+        const parts = authHeader.split(' ');
+        if (parts.length === 2 && parts[0] === 'Bearer') {
+            token = parts[1];
+            logger.debug(`🔑 Token found in 'Authorization' header (standard format)`);
+        } else {
+            logger.warn(`⚠️  Authorization header present but invalid format: "${authHeader}"`);
+        }
+    }
+    
+    // No valid token found - return 401
+    if (!token) {
+        logger.warn('❌ Bearer auth failed: No valid token in headers');
+        logger.debug(`🔍 Headers checked: authorization="${authHeader}", bearer="${bearerHeader}"`);
+        res.status(401).json({
+            jsonrpc: '2.0',
+            error: {
+                code: -32001,
+                message: 'Unauthorized: Missing or invalid authorization',
+                data: 'Provide token in "Authorization: Bearer <token>" header or "bearer" header'
+            }
+        });
+        return;
+    }
+
+    // Validate the token
+    if (token !== accessToken) {
+        logger.warn(`❌ Bearer auth failed: Invalid token (length: ${token.length})`);
+        res.status(401).json({
+            jsonrpc: '2.0',
+            error: {
+                code: -32001,
+                message: 'Unauthorized: Invalid access token'
+            }
+        });
+        return;
+    }
+
+    // Token is valid, proceed
+    logger.debug('✅ Bearer authentication successful');
+    next();
+}
+
+/**
  * Create Express application
  */
 export function createApp(): express.Application {
@@ -166,7 +235,7 @@ export function createApp(): express.Application {
             : true, // Allow all origins in development
         credentials: true,
         exposedHeaders: ['Mcp-Session-Id'],
-        allowedHeaders: ['Content-Type', 'mcp-session-id', 'MCP-Protocol-Version']
+        allowedHeaders: ['Content-Type', 'mcp-session-id', 'MCP-Protocol-Version', 'Authorization', 'bearer']
     }));
 
     app.use(express.json({ limit: '10mb' }));
@@ -308,8 +377,9 @@ export function createApp(): express.Application {
     });
 
     // Main MCP endpoint - handles all MCP communication
-    // SECURITY: Optional authentication - allows Claude Desktop to connect without OAuth
-    app.post('/mcp', authService.authenticateJWT() as express.RequestHandler, async (req, res) => {
+    // SECURITY: Dual authentication - Bearer token OR OAuth JWT
+    // If ACCESS_TOKEN is set, bearer auth is enforced first. Then JWT auth (if configured)
+    app.post('/mcp', bearerTokenAuthMiddleware, authService.authenticateJWT() as express.RequestHandler, async (req, res) => {
         const authReq = req as AuthRequest;
         try {
             // Get session ID from header
@@ -1149,7 +1219,16 @@ export async function startServer(port: number = 3000): Promise<void> {
 }
 
 // Start server if this file is run directly
-const port = parseInt(process.env.PORT || '3000');
+const port = parseInt(process.env.PORT || '3144');
+
+// Warn if ACCESS_TOKEN is not set (optional but recommended)
+if (!process.env.ACCESS_TOKEN) {
+    logger.warn('⚠️  ACCESS_TOKEN not set - server will run WITHOUT bearer token authentication');
+    logger.warn('⚠️  Set ACCESS_TOKEN in .env or environment to enable bearer token authentication');
+} else {
+    logger.info('🔐 Bearer token authentication ENABLED - clients must provide valid ACCESS_TOKEN');
+}
+
 startServer(port).catch((error) => {
     console.error('Failed to start server:', error);
     process.exit(1);
