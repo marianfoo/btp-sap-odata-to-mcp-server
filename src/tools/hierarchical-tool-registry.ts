@@ -85,7 +85,7 @@ export class HierarchicalSAPToolRegistry {
                 description: "🔐 AUTHENTICATION AWARE: Get detailed schema information for a specific entity including properties, types, keys, and constraints. Schema access uses technical user, but data operations require user authentication.",
                 inputSchema: {
                     serviceId: z.string().describe("The SAP service ID from search-sap-services (use the 'id' field, NOT the 'title' field)"),
-                    entityName: z.string().describe("The entity name from discover-service-entities")
+                    entityName: z.string().describe("The entity name from discover-service-entities (use the 'name' field, NOT the 'entitySet' field)")
                 }
             },
             async (args: Record<string, unknown>) => {
@@ -101,7 +101,7 @@ export class HierarchicalSAPToolRegistry {
                 description: "🔒 AUTHENTICATION REQUIRED: Perform CRUD operations on SAP entities using authenticated user context. This tool requires valid JWT token for authorization and audit trail. Use discover-service-entities first to understand available entities and their schemas. Operations execute under user's SAP identity.",
                 inputSchema: {
                     serviceId: z.string().describe("The SAP service ID from search-sap-services (use the 'id' field, NOT the 'title' field)"),
-                    entityName: z.string().describe("The entity name from discover-service-entities"),
+                    entityName: z.string().describe("The entity name from discover-service-entities (use the 'name' field, NOT the 'entitySet' field)"),
                     operation: z.enum(["read", "read-single", "create", "update", "delete"]).describe("The operation to perform"),
                     parameters: z.record(z.any()).optional().describe("Operation parameters (keys, filters, data, etc.)"),
                     queryOptions: z.object({
@@ -346,8 +346,9 @@ export class HierarchicalSAPToolRegistry {
             responseText += `📁 Found ${entities.length} entities\n\n`;
             responseText += JSON.stringify(serviceInfo, null, 2);
             responseText += `\n\n📋 Next steps:\n`;
-            responseText += `• Use 'get-entity-schema' to see detailed property information for an entity\n`;
-            responseText += `• Use 'execute-entity-operation' to perform CRUD operations`;
+            responseText += `• Use 'get-entity-schema' with entityName set to the 'name' field (NOT 'entitySet') to see detailed property information\n`;
+            responseText += `• Use 'execute-entity-operation' with entityName set to the 'name' field (NOT 'entitySet') to perform CRUD operations\n`;
+            responseText += `\n⚠️  IMPORTANT: Always use the 'name' field for entityName, never use the 'entitySet' field!`;
 
             return {
                 content: [{
