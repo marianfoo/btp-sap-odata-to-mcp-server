@@ -14,6 +14,7 @@
     "copy-static": "mkdir -p dist/public && cp -r src/public/* dist/public/ || xcopy src\\public dist\\public /E /I /Y 2>NUL || echo 'Static files copied'",
     "build:watch": "tsc --watch",
     "clean": "rm -rf dist node_modules/.cache",
+    "dev": "npm run build && npm run start",
     "start": "node dist/index.js",
     "start:http": "npm run build && node dist/index.js",
     "start:stdio": "npm run build && node dist/mcp-server.js",

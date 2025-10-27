@@ -49,18 +49,22 @@ export class SAPDiscoveryService {
                 this.logger.warn(`Service discovery limited to ${maxServices} services (configured maximum). ${filteredServices.length - maxServices} services were excluded.`);
             }
 
-            // Enrich services with metadata
+            // Enrich services with metadata (skip failed services instead of failing completely)
+            const workingServices: ODataService[] = [];
             for (const service of limitedServices) {
                 try {
                     this.logger.debug(`Discovering metadata for service: ${service.id} at ${service.metadataUrl}`);
                     service.metadata = await this.getServiceMetadata(service);
+                    workingServices.push(service);
+                    this.logger.debug(`✅ Successfully loaded metadata for service: ${service.id}`);
                 } catch (error) {
-                    this.logger.warn(`Failed to get metadata for service ${service.id}:`, error);
+                    this.logger.warn(`⚠️  Skipping service ${service.id} due to metadata error:`, error instanceof Error ? error.message : error);
+                    // Continue with next service instead of failing
                 }
             }
 
-            this.logger.info(`Successfully initialized ${limitedServices.length} OData services`);
-            return limitedServices;
+            this.logger.info(`Successfully initialized ${workingServices.length} OData services (${limitedServices.length - workingServices.length} services skipped due to metadata errors)`);
+            return workingServices;
 
         } catch (error) {
             this.logger.error('Service discovery failed:', error);
