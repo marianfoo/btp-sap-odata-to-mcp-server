@@ -330,6 +330,94 @@ npm run start:http
 
 See more details and troubleshooting in [LOCAL_RUN.md](./docs/LOCAL_RUN.md).
 
+## 🔐 Microsoft Entra ID Authentication (NEW!)
+
+Run the MCP server on your own infrastructure with Microsoft Entra ID (Azure AD) authentication, allowing multiple users to access SAP systems with their personal credentials.
+
+### **What's Different from BTP Deployment?**
+
+| Feature | BTP Deployment | Entra ID Deployment |
+|---------|---------------|---------------------|
+| **Authentication** | SAP XSUAA | Microsoft Entra ID |
+| **User Management** | SAP BTP | Microsoft 365 / Azure AD |
+| **Deployment** | Cloud Foundry | Your own server |
+| **SAP Credentials** | Principal Propagation | Stored in Entra ID attributes |
+| **Multi-User** | ✅ Yes | ✅ Yes |
+| **SSO** | ✅ Yes | ✅ Yes |
+
+### **How It Works**
+
+```
+User → Microsoft Login → Entra ID Token → MCP Server → User's SAP Credentials → SAP System
+```
+
+1. User authenticates with Microsoft credentials
+2. Entra ID returns token with custom attributes containing SAP username/password
+3. MCP server creates user-specific session
+4. All SAP operations execute with user's personal SAP credentials
+
+### **Quick Setup**
+
+1. **Configure Entra ID Application** (see [ENTRA_ID_SETUP.md](./docs/ENTRA_ID_SETUP.md)):
+   - Register app in Azure Portal
+   - Add custom user attributes for SAP credentials
+   - Configure OAuth redirect URIs
+
+2. **Set Environment Variables**:
+   ```env
+   AUTH_MODE=entra
+   ENTRA_TENANT_ID=your-tenant-id
+   ENTRA_CLIENT_ID=your-client-id
+   ENTRA_CLIENT_SECRET=your-client-secret
+   ENTRA_REDIRECT_URI=https://your-server.com/oauth/entra/callback
+   ENTRA_SAP_USERNAME_CLAIM=extensionSAPUsername
+   ENTRA_SAP_PASSWORD_CLAIM=extensionSAPPassword
+   SAP_BASE_URL=https://your-sap-system.com:50001
+   SESSION_SECRET=generate-random-secret
+   ```
+
+3. **Start the Server**:
+   ```bash
+   npm install
+   npm run build
+   npm start
+   ```
+
+4. **Authenticate**:
+   - Navigate to `https://your-server.com/oauth/entra/authorize`
+   - Login with Microsoft credentials
+   - Start using MCP with your SAP credentials
+
+### **Important Notes**
+
+⚠️ **POC Approach**: The current implementation stores SAP passwords in Entra ID custom attributes. This is suitable for POC/testing but **NOT recommended for production**.
+
+✅ **Production Alternatives**:
+- **SAML Federation**: Configure SAP to trust Entra ID tokens directly
+- **Azure Key Vault**: Store SAP credentials securely in Key Vault
+- **Certificate Auth**: Use X.509 certificates instead of passwords
+- **SAP IAS Integration**: Use SAP Cloud Identity Services
+
+See [SSO_BEST_PRACTICES.md](./docs/SSO_BEST_PRACTICES.md) for production-ready solutions.
+
+### **Documentation**
+
+- 📚 [Entra ID Setup Guide](./docs/ENTRA_ID_SETUP.md) - Complete Azure Portal configuration
+- 🔒 [SSO Best Practices](./docs/SSO_BEST_PRACTICES.md) - Production-ready authentication
+- 🚀 [Deployment Guide](./docs/ENTRA_ID_DEPLOYMENT.md) - Deploy to your server
+
+### **Use Cases**
+
+**Perfect for:**
+- Running MCP server on your own infrastructure
+- Organizations using Microsoft 365 / Azure AD
+- Multi-user access with personal SAP credentials
+- Testing and development environments
+
+**Not suitable for:**
+- Production without proper credential management
+- Storing sensitive passwords in Entra ID attributes long-term
+
 ## 🎬 Demo
 
 See the MCP server in action:

@@ -12,10 +12,26 @@ export class Config {
         this.config.set('sap.destinationName', process.env.SAP_DESTINATION_NAME || 'SAP_SYSTEM');
         this.config.set('sap.discoveryDestinationName', process.env.SAP_DISCOVERY_DESTINATION_NAME);
         this.config.set('sap.executionDestinationName', process.env.SAP_EXECUTION_DESTINATION_NAME);
+        this.config.set('sap.baseUrl', process.env.SAP_BASE_URL); // Base URL for SAP system (used with Entra ID)
         this.config.set('request.timeout', parseInt(process.env.REQUEST_TIMEOUT || '30000'));
         this.config.set('request.retries', parseInt(process.env.REQUEST_RETRIES || '3'));
         this.config.set('log.level', process.env.LOG_LEVEL || 'info');
         this.config.set('node.env', process.env.NODE_ENV || 'development');
+
+        // Authentication mode configuration
+        this.config.set('auth.mode', process.env.AUTH_MODE || 'auto'); // 'xsuaa', 'entra', or 'auto'
+
+        // Microsoft Entra ID configuration
+        this.config.set('entra.tenantId', process.env.ENTRA_TENANT_ID);
+        this.config.set('entra.clientId', process.env.ENTRA_CLIENT_ID);
+        this.config.set('entra.clientSecret', process.env.ENTRA_CLIENT_SECRET);
+        this.config.set('entra.redirectUri', process.env.ENTRA_REDIRECT_URI);
+        this.config.set('entra.sapUsernameClaimName', process.env.ENTRA_SAP_USERNAME_CLAIM || 'extensionSAPUsername');
+        this.config.set('entra.sapPasswordClaimName', process.env.ENTRA_SAP_PASSWORD_CLAIM || 'extensionSAPPassword');
+
+        // Session configuration
+        this.config.set('session.secret', process.env.SESSION_SECRET || 'change-this-secret-in-production');
+        this.config.set('session.timeoutMs', parseInt(process.env.SESSION_TIMEOUT_MS || '3600000')); // 1 hour default
 
         // OAuth configuration
         // this.config.set('oauth.redirectBaseUrl', process.env.OAUTH_REDIRECT_BASE_URL || 'http://localhost:3000');

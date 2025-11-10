@@ -1,6 +1,8 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
+import session from 'express-session';
 import { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
@@ -15,6 +17,7 @@ import { SAPDiscoveryService } from './services/sap-discovery.js';
 import { ODataService } from './types/sap-types.js';
 import { ServiceDiscoveryConfigService } from './services/service-discovery-config.js';
 import { AuthService, AuthRequest } from './services/auth-service.js';
+import { EntraAuthService, EntraIDRequest } from './services/entra-auth-service.js';
 
 // Global type extensions
 declare global {
@@ -48,6 +51,7 @@ const sapClient = new SAPClient(destinationService, logger);
 const sapDiscoveryService = new SAPDiscoveryService(sapClient, logger, config);
 const serviceConfigService = new ServiceDiscoveryConfigService(config, logger);
 const authService = new AuthService(logger, config);
+const entraAuthService = new EntraAuthService(logger, config);
 let discoveredServices: ODataService[] = [];
 
 // Session storage for HTTP transport with user context
@@ -171,6 +175,21 @@ export function createApp(): express.Application {
 
     app.use(express.json({ limit: '10mb' }));
     app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+    
+    // Cookie parser for Entra ID sessions
+    app.use(cookieParser());
+    
+    // Session middleware for Entra ID
+    app.use(session({
+        secret: config.get<string>('session.secret', 'change-this-secret-in-production'),
+        resave: false,
+        saveUninitialized: false,
+        cookie: {
+            secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+            httpOnly: true,
+            maxAge: config.get<number>('session.timeoutMs', 3600000) // 1 hour default
+        }
+    }));
 
     // Request logging middleware
     app.use((req, res, next) => {
@@ -1004,6 +1023,286 @@ export function createApp(): express.Application {
                 error: 'invalid_grant',
                 error_description: error instanceof Error ? error.message : 'Token refresh failed'
             });
+        }
+    });
+
+    // ============================================================================
+    // Microsoft Entra ID OAuth Endpoints (Alternative Authentication)
+    // ============================================================================
+
+    // Entra ID Authorization endpoint - Start OAuth flow
+    app.get('/oauth/entra/authorize', async (req, res) => {
+        logger.info('Starting Entra ID authorization flow');
+        
+        try {
+            if (!entraAuthService.isConfigured()) {
+                return res.status(501).json({
+                    error: 'Entra ID not configured',
+                    message: 'Microsoft Entra ID authentication is not configured. Please set ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET, and ENTRA_REDIRECT_URI environment variables.',
+                    documentation: '/docs/entra-id-setup'
+                });
+            }
+
+            const authUrl = await entraAuthService.getAuthorizationUrl();
+            logger.info('Redirecting to Entra ID authorization URL');
+            res.redirect(authUrl);
+            
+        } catch (error) {
+            logger.error('Failed to initiate Entra ID OAuth flow:', error);
+            res.status(500).json({
+                error: 'Authorization failed',
+                message: error instanceof Error ? error.message : 'Failed to start authorization'
+            });
+        }
+    });
+
+    // Entra ID Callback endpoint - Handle OAuth callback
+    app.get('/oauth/entra/callback', async (req, res) => {
+        logger.info('Handling Entra ID OAuth callback');
+        
+        try {
+            const code = req.query.code as string;
+            const state = req.query.state as string;
+            const error = req.query.error as string;
+
+            if (error) {
+                const errorDescription = req.query.error_description as string || error;
+                logger.error(`Entra ID authorization error: ${errorDescription}`);
+                return res.status(400).send(`
+                    <html><body style="font-family: sans-serif; text-align: center; padding: 2rem;">
+                        <h1>❌ Authentication Failed</h1>
+                        <p>${errorDescription}</p>
+                        <a href="/oauth/entra/authorize" style="display: inline-block; padding: 0.5rem 1rem; background: #0078d4; color: white; text-decoration: none; border-radius: 4px;">Try Again</a>
+                    </body></html>
+                `);
+            }
+
+            if (!code || !state) {
+                logger.error('Missing code or state in Entra ID callback');
+                return res.status(400).send(`
+                    <html><body style="font-family: sans-serif; text-align: center; padding: 2rem;">
+                        <h1>❌ Authentication Failed</h1>
+                        <p>Authorization code not provided.</p>
+                        <a href="/oauth/entra/authorize" style="display: inline-block; padding: 0.5rem 1rem; background: #0078d4; color: white; text-decoration: none; border-radius: 4px;">Try Again</a>
+                    </body></html>
+                `);
+            }
+
+            // Exchange code for tokens and create session
+            const session = await entraAuthService.exchangeCodeForToken(code, state);
+            
+            // Set session cookie
+            res.cookie('entra_session_id', session.sessionId, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                maxAge: config.get<number>('session.timeoutMs', 3600000),
+                sameSite: 'lax'
+            });
+
+            logger.info(`Entra ID authentication successful for user: ${session.entraEmail}`);
+
+            // Return success page with session info
+            res.send(`
+                <html><body style="font-family: sans-serif; text-align: center; padding: 2rem;">
+                    <h1>✅ Authentication Successful</h1>
+                    <p>Welcome, ${session.entraDisplayName || session.entraEmail}!</p>
+                    <div style="margin: 2rem auto; padding: 1rem; background: #f0f0f0; border-radius: 8px; max-width: 600px; text-align: left;">
+                        <h3>Session Information:</h3>
+                        <p><strong>Email:</strong> ${session.entraEmail}</p>
+                        <p><strong>SAP Username:</strong> ${session.sapUsername}</p>
+                        <p><strong>Session ID:</strong> ${session.sessionId}</p>
+                        <p><strong>Session Expires:</strong> ${new Date(Date.now() + config.get<number>('session.timeoutMs', 3600000)).toLocaleString()}</p>
+                    </div>
+                    <p>You can now use the MCP server with your authenticated session.</p>
+                    <div style="margin-top: 2rem;">
+                        <a href="/oauth/entra/userinfo" style="display: inline-block; padding: 0.5rem 1rem; background: #0078d4; color: white; text-decoration: none; border-radius: 4px; margin: 0.5rem;">View User Info</a>
+                        <a href="/health" style="display: inline-block; padding: 0.5rem 1rem; background: #107c10; color: white; text-decoration: none; border-radius: 4px; margin: 0.5rem;">Server Health</a>
+                    </div>
+                </body></html>
+            `);
+
+        } catch (error) {
+            logger.error('Entra ID callback failed:', error);
+            res.status(500).send(`
+                <html><body style="font-family: sans-serif; text-align: center; padding: 2rem;">
+                    <h1>❌ Authentication Failed</h1>
+                    <p>Error: ${error instanceof Error ? error.message : 'Unknown error'}</p>
+                    <a href="/oauth/entra/authorize" style="display: inline-block; padding: 0.5rem 1rem; background: #0078d4; color: white; text-decoration: none; border-radius: 4px;">Try Again</a>
+                </body></html>
+            `);
+        }
+    });
+
+    // Entra ID User Info endpoint
+    app.get('/oauth/entra/userinfo', (req, res) => {
+        const sessionId = req.cookies?.entra_session_id;
+
+        if (!sessionId) {
+            return res.status(401).json({
+                error: 'Not authenticated',
+                message: 'No Entra ID session found. Please authenticate first.',
+                authUrl: '/oauth/entra/authorize'
+            });
+        }
+
+        const session = entraAuthService.getUserInfo(sessionId);
+
+        if (!session) {
+            return res.status(401).json({
+                error: 'Session expired',
+                message: 'Your session has expired. Please authenticate again.',
+                authUrl: '/oauth/entra/authorize'
+            });
+        }
+
+        res.json({
+            entraUserId: session.entraUserId,
+            entraEmail: session.entraEmail,
+            entraDisplayName: session.entraDisplayName,
+            sapUsername: session.sapUsername,
+            sapCredentialsValidated: session.sapCredentialsValidated,
+            sessionId: session.sessionId,
+            createdAt: session.createdAt,
+            lastAccessedAt: session.lastAccessedAt,
+            tokenExpiresAt: session.tokenExpiresAt
+        });
+    });
+
+    // Entra ID Logout endpoint
+    app.post('/oauth/entra/logout', (req, res) => {
+        const sessionId = req.cookies?.entra_session_id;
+
+        if (sessionId) {
+            entraAuthService.destroySession(sessionId);
+            res.clearCookie('entra_session_id');
+            logger.info(`User logged out: ${sessionId}`);
+        }
+
+        res.json({
+            message: 'Logged out successfully'
+        });
+    });
+
+    // Entra ID Stats endpoint (for monitoring)
+    app.get('/oauth/entra/stats', (req, res) => {
+        if (!entraAuthService.isConfigured()) {
+            return res.status(501).json({
+                error: 'Entra ID not configured'
+            });
+        }
+
+        const stats = entraAuthService.getStats();
+        res.json(stats);
+    });
+
+    // ============================================================================
+    // MCP Endpoint for Entra ID Authenticated Users
+    // ============================================================================
+
+    // MCP endpoint for Entra ID authenticated users
+    app.post('/mcp-entra', async (req: EntraIDRequest, res: Response) => {
+        try {
+            // Get Entra ID session
+            const sessionId = req.cookies?.entra_session_id;
+            
+            if (!sessionId) {
+                return res.status(401).json({
+                    jsonrpc: '2.0',
+                    error: {
+                        code: -32000,
+                        message: 'Authentication Required: No Entra ID session found. Please authenticate at /oauth/entra/authorize'
+                    },
+                    id: req.body?.id || null
+                });
+            }
+
+            const entraSession = entraAuthService.getUserInfo(sessionId);
+            
+            if (!entraSession) {
+                return res.status(401).json({
+                    jsonrpc: '2.0',
+                    error: {
+                        code: -32000,
+                        message: 'Session Expired: Please re-authenticate at /oauth/entra/authorize'
+                    },
+                    id: req.body?.id || null
+                });
+            }
+
+            // Get or create MCP session for this Entra ID user
+            const mcpSessionId = `entra-${sessionId}`;
+            let mcpSession;
+
+            if (sessions.has(mcpSessionId)) {
+                mcpSession = sessions.get(mcpSessionId)!;
+                logger.debug(`♻️  Reusing MCP session for Entra ID user: ${entraSession.entraEmail}`);
+            } else if (isInitializeRequest(req.body)) {
+                logger.info(`🆕 Creating new MCP session for Entra ID user: ${entraSession.entraEmail}`);
+                
+                // Create MCP server with user-specific SAP credentials
+                // Note: We'll need to modify createMCPServer to accept user credentials
+                const mcpServer = await createMCPServer(discoveredServices);
+                
+                // Create HTTP transport
+                const transport = new StreamableHTTPServerTransport({
+                    sessionIdGenerator: () => mcpSessionId,
+                    onsessioninitialized: (id) => {
+                        logger.debug(`✅ MCP session initialized for Entra ID user: ${id}`);
+                    },
+                    enableDnsRebindingProtection: false,
+                    allowedHosts: ['127.0.0.1', 'localhost']
+                });
+
+                // Connect server to transport
+                await mcpServer.getServer().connect(transport);
+
+                // Store MCP session
+                mcpSession = {
+                    server: mcpServer,
+                    transport,
+                    createdAt: new Date(),
+                    userId: entraSession.entraEmail
+                };
+                sessions.set(mcpSessionId, mcpSession);
+
+                // Clean up MCP session when transport closes
+                transport.onclose = () => {
+                    logger.info(`🔌 MCP transport closed for Entra ID user: ${entraSession.entraEmail}`);
+                    sessions.delete(mcpSessionId);
+                };
+
+                logger.info(`🎉 MCP session created for Entra ID user: ${entraSession.entraEmail}`);
+            } else {
+                return res.status(400).json({
+                    jsonrpc: '2.0',
+                    error: {
+                        code: -32000,
+                        message: 'Bad Request: No valid MCP session and not an initialize request'
+                    },
+                    id: req.body?.id || null
+                });
+            }
+
+            // Attach Entra session to request for potential use in tools
+            req.entraSession = entraSession;
+            req.sessionId = sessionId;
+
+            // Handle the MCP request
+            await mcpSession.transport.handleRequest(req, res, req.body);
+
+        } catch (error) {
+            logger.error('❌ Error handling Entra ID MCP request:', error);
+
+            if (!res.headersSent) {
+                res.status(500).json({
+                    jsonrpc: '2.0',
+                    error: {
+                        code: -32603,
+                        message: `Internal server error: ${error instanceof Error ? error.message : 'Unknown error'}`
+                    },
+                    id: req.body?.id || null
+                });
+            }
         }
     });
 

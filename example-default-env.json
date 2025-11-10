@@ -8,7 +8,7 @@
                     "xsuaa"
                 ],
                 "credentials": {
-                    <for running in BAS add credentials>
+                    "_comment": "For running in BAS add XSUAA credentials here"
                 }
             }
         ],
@@ -20,7 +20,7 @@
                     "destination"
                 ],
                 "credentials": {
-                    <for running in BAS add credentials>
+                    "_comment": "For running in BAS add Destination service credentials here"
                 }
             }
         ],
@@ -32,9 +32,22 @@
                     "connectivity"
                 ],
                 "credentials": {
-                    <for running in BAS add credentials>
+                    "_comment": "For running in BAS add Connectivity service credentials here"
                 }
             }
         ]
-    }
+    },
+    "_comment_entra_id": "For Microsoft Entra ID authentication, add these environment variables instead of VCAP_SERVICES",
+    "AUTH_MODE": "entra",
+    "ENTRA_TENANT_ID": "your-tenant-id-here",
+    "ENTRA_CLIENT_ID": "your-client-id-here",
+    "ENTRA_CLIENT_SECRET": "your-client-secret-here",
+    "ENTRA_REDIRECT_URI": "https://your-server.com/oauth/entra/callback",
+    "ENTRA_SAP_USERNAME_CLAIM": "extensionSAPUsername",
+    "ENTRA_SAP_PASSWORD_CLAIM": "extensionSAPPassword",
+    "SAP_BASE_URL": "https://your-sap-system.com:50001",
+    "SESSION_SECRET": "generate-a-secure-random-secret",
+    "SESSION_TIMEOUT_MS": "3600000",
+    "PORT": "3000",
+    "LOG_LEVEL": "info"
 }

@@ -143,4 +143,29 @@ export class DestinationService {
     getXSUAACredentials() {
         return (this.vcapServices?.xsuaa as { credentials?: unknown })?.credentials;
     }
+
+    /**
+     * Get destination for a specific user with their SAP credentials
+     * Used with Entra ID authentication where each user has their own SAP credentials
+     * 
+     * @param sapUsername - User's SAP username from Entra ID claim
+     * @param sapPassword - User's SAP password from Entra ID claim
+     * @returns HttpDestination configured with user's credentials
+     */
+    getDestinationForUser(sapUsername: string, sapPassword: string): HttpDestination {
+        const baseUrl = this.config.get<string>('sap.baseUrl');
+        
+        if (!baseUrl) {
+            throw new Error('SAP_BASE_URL not configured. Required for Entra ID authentication mode.');
+        }
+
+        this.logger.debug(`Creating user-specific destination for SAP user: ${sapUsername}`);
+
+        return {
+            url: baseUrl,
+            username: sapUsername,
+            password: sapPassword,
+            authentication: 'BasicAuthentication'
+        } as HttpDestination;
+    }
 }
